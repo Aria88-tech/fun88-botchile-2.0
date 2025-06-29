@@ -1,27 +1,25 @@
 import os
 import logging
-import openai
-from telegram import Update
+from telegram import Update, ChatMember
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     MessageHandler,
     ContextTypes,
     filters,
+    ChatMemberHandler,
 )
+import openai
+import asyncio
 
-# Carga las claves desde variables de entorno
+# Si usas Jupyter u otro entorno que ya tenga event loop corriendo, descomenta la línea siguiente
+# import nest_asyncio; nest_asyncio.apply()
+
+# Configura la API key de OpenAI y el token de Telegram bot desde variables de entorno
 openai.api_key = os.getenv("OPENAI_API_KEY")
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-if not TOKEN:
-    print("ERROR: La variable de entorno TELEGRAM_BOT_TOKEN no está configurada o está vacía.")
-    exit(1)
-
-if not openai.api_key:
-    print("ERROR: La variable de entorno OPENAI_API_KEY no está configurada o está vacía.")
-    exit(1)
-
+# Configura logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -54,9 +52,11 @@ RESPUESTAS = {
     "bono": "🎁 Puedes revisar los bonos disponibles aquí: https://www.fun88chile.com/promotions",
 }
 
+# Handler para /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(WELCOME_MESSAGE)
 
+# Handler para responder texto con respuestas predefinidas o IA
 async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     mensaje = update.message.text.lower()
 
@@ -71,7 +71,11 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
             messages=[
                 {"role": "system", "content": "Actúa como asistente de soporte de Fun88 Chile."},
                 {"role": "user", "content": mensaje}
-            ]
+            ],
+            max_tokens=150,
+            n=1,
+            stop=None,
+            temperature=0.7,
         )
         reply = response.choices[0].message.content
         await update.message.reply_text(reply)
@@ -79,13 +83,31 @@ async def responder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"Error con OpenAI: {e}")
         await update.message.reply_text("Lo siento, no puedo responder eso ahora.")
 
+# Handler para saludar nuevos miembros
+async def greet_new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.chat_member.new_chat_members:
+        for member in update.chat_member.new_chat_members:
+            # Ignora bots si quieres:
+            if member.is_bot:
+                continue
+            await context.bot.send_message(
+                chat_id=update.chat_member.chat.id,
+                text=f"¡Hola {member.full_name}! {WELCOME_MESSAGE}"
+            )
+
 async def main():
     app = ApplicationBuilder().token(TOKEN).build()
+
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), responder))
+    app.add_handler(ChatMemberHandler(greet_new_member, ChatMemberHandler.CHAT_MEMBER))
+
     logger.info("Bot iniciado con éxito.")
     await app.run_polling()
 
-if __name__ == '__main__':
-    import asyncio
-    asyncio.run(main())
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except RuntimeError as e:
+        # En caso de event loop ya corriendo (por ejemplo en Jupyter)
+        logger.warning(f"RuntimeError al ejecutar asyncio.run(): {e}")
