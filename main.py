@@ -106,8 +106,11 @@ async def main():
     await app.run_polling()
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except RuntimeError as e:
-        # En caso de event loop ya corriendo (por ejemplo en Jupyter)
-        logger.warning(f"RuntimeError al ejecutar asyncio.run(): {e}")
+    import asyncio
+    import nest_asyncio
+
+    nest_asyncio.apply()
+    loop = asyncio.get_event_loop()
+    loop.create_task(main())
+    loop.run_forever()
+
